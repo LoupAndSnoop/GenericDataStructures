@@ -74,6 +74,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     #region Modify the Contents of the Forest
     /// <summary> Add this object as a new node into the trees. It will start as a node in the root. </summary>
     public void AddAtRoot(TStored obj) {
+        Debug.Assert(obj != null, "We can't add a null object to the forest!");
         Debug.Assert(!nodeDirectory.ContainsKey(obj), "Trying to add something that is already in the forest!");
         TreeNode newNode = new TreeNode(obj);
         rootNodes.Add(newNode);
@@ -99,11 +100,11 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
 
     /// <summary> Remove the connection (only the connection) from parent to child. This puts the child into the root. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DisconnectChild(TStored parent, TStored child) => DisconnectChild(nodeDirectory[parent], nodeDirectory[child]);
+    public void DisconnectFromParent(TStored child) => DisconnectFromParent(nodeDirectory[child]);
     /// <summary> Remove the connection (only the connection) from parent to child. </summary>
-    private void DisconnectChild(TreeNode parentNode, TreeNode childNode) {
-        Debug.Assert(childNode.currentParent == parentNode, $"Trying to disconnect a child ({childNode.self}) from parent ({parentNode.self})," +
-            $" but that parent isn't this child's parent ({childNode.currentParent.self})!");
+    private void DisconnectFromParent(TreeNode childNode) {
+        TreeNode parentNode = childNode.currentParent;
+        Debug.Assert(!(parentNode is null), "Trying to disconnect child from parent, but it doesn't have a parent!");
         parentNode.children.Remove(childNode);
         rootNodes.Add(childNode);
         childNode.currentParent = null;
@@ -113,9 +114,9 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     public void DeleteNode(TStored toDelete) {
         TreeNode nodeToDel = nodeDirectory[toDelete];
         for (int i = nodeToDel.children.Count - 1; i > -1; i--) {
-            DisconnectChild(nodeToDel, nodeToDel.children[i]);
+            DisconnectFromParent(nodeToDel.children[i]);
         }
-        if (nodeToDel.currentParent != null) nodeToDel.currentParent.children.Remove(nodeToDel);
+        if (!(nodeToDel.currentParent is null)) nodeToDel.currentParent.children.Remove(nodeToDel);
 
         nodeDirectory.Remove(toDelete);
         rootNodes.Remove(nodeToDel);
@@ -363,7 +364,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         sb.Append(testForest.ToString());
 
         // Disconnect
-        testForest.DisconnectChild("BCA", "BCAA");
+        testForest.DisconnectFromParent("BCAA");
         sb.Append("\n\nAfter disconnecting BCAA from BCA: \n");
         sb.Append(testForest.ToString());
 
