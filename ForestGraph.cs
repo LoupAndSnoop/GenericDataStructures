@@ -16,17 +16,15 @@ using System.Runtime.CompilerServices;
 /// and efficiently enumerate through all the contents. </para> </summary>
 /// <typeparam name="TStored">The type stored in the forest. Must be a class so we can check == null.</typeparam>
 public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
-
     /// <summary> List of all the nodes in the root (ie have no parent) </summary>
-    private List<TreeNode> rootNodes = new List<TreeNode>();
+    protected List<TreeNode> rootNodes = new List<TreeNode>();
     /// <summary> Directory that links every entry we are storing to its node. </summary>
-    private Dictionary<TStored, TreeNode> nodeDirectory = new Dictionary<TStored, TreeNode>();
-
+    protected Dictionary<TStored, TreeNode> nodeDirectory = new Dictionary<TStored, TreeNode>();
 
     /// <summary> This is the main interior data structure that 1) holds the entry in the forest,
     /// and 2) holds information about what it is immediately connected to. This is like
     /// a single entry of a doubly linked list. Don't expose this. </summary>
-    private class TreeNode {
+    protected class TreeNode {
         /// <summary> What is actually stored in the node. </summary>
         public TStored self;
         /// <summary> The node which is our direct current parent. == null => we have no parent, and are in root. </summary>
@@ -37,21 +35,23 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TreeNode(TStored self) => this.self = self;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static implicit operator TStored(TreeNode node) => node.self;
+        public static explicit operator TStored(TreeNode node) => node.self;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public override string ToString() => self.ToString();
     }
 
-    #region Basic accessors
+    #region Basic accessors (typical of IEnumerables)
     /// <summary> True if forest contains this entry. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool Contains(TStored content) => nodeDirectory.ContainsKey(content);
     /// <summary> Total entries in forest </summary>
     public int Count => nodeDirectory.Count;
+    /// <summary> Clear the contents of the forest. </summary>
+    public virtual void Clear() { nodeDirectory.Clear(); rootNodes.Clear(); }
 
     /// <summary> Give the current parent of this. If no parent (in root), return null. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TStored ParentOf(TStored child) => nodeDirectory[child].currentParent.self;
+    public TStored ParentOf(TStored child) => nodeDirectory[child].currentParent?.self;
 
     /// <summary> Give the number of direct children this parent has. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -71,9 +71,45 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     }
     #endregion
 
+    #region Order-based accessors
+    /// <summary>Compare stored objects obj1 and obj2. Return the -1 if obj1 comes out first, and 1 if obj2 comes out first,
+    /// when enumerating breadth first. This isn't super fast, so don't spam this.</summary>
+    public int CompareBreadthFirstOrder(TStored obj1, TStored obj2) { // TODO: Untested.
+        Debug.Assert(nodeDirectory.ContainsKey(obj1), "First argument isn't in the forest graph!");
+        Debug.Assert(nodeDirectory.ContainsKey(obj2), "First argument isn't in the forest graph!");
+        Debug.Assert(obj1 != obj2, "Can't compare two of the same object! I could return 0, but this is probably a mistake!");
+
+        List<TreeNode> nodeLineage1 = AllParentNodesIncluding(nodeDirectory[obj1]);
+        List<TreeNode> nodeLineage2 = AllParentNodesIncluding(nodeDirectory[obj2]);
+
+        // If different length, the longer one comes later.
+        if (nodeLineage1.Count != nodeLineage2.Count) return nodeLineage1.Count.CompareTo(nodeLineage2.Count);
+        // Same length, so we need to find the first parent that is different between the two.
+        for (int i = nodeLineage1.Count - 1; i > -1; i--) {
+            if (nodeLineage1[i] != nodeLineage2[i]) { // Found earliest parent that was different! Compare the parents' order.
+                return CompareSiblingNodes(nodeLineage1[i], nodeLineage2[i]);
+            }
+        }
+
+        int CompareSiblingNodes(TreeNode lhs, TreeNode rhs) {
+            foreach (TreeNode node in lhs.currentParent.children) {
+                if (node == lhs) return -1;
+                else if (node == rhs) return 1;
+            }
+            Debug.LogError("We should have found the two nodes as siblings before that loop is done!");
+            return 0;
+        }
+
+        Debug.LogError("The comparison method should have resolved its comparison before that loop ends!");
+        return 0;
+    }
+
+
+    #endregion
+
     #region Modify the Contents of the Forest
     /// <summary> Add this object as a new node into the trees. It will start as a node in the root. </summary>
-    public void AddAtRoot(TStored obj) {
+    public virtual void AddAtRoot(TStored obj) {
         Debug.Assert(obj != null, "We can't add a null object to the forest!");
         Debug.Assert(!nodeDirectory.ContainsKey(obj), "Trying to add something that is already in the forest!");
         TreeNode newNode = new TreeNode(obj);
@@ -82,7 +118,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     }
 
     /// <summary> Assuming parent and child are already registered in tree, establish a new connection from parent to child. </summary>
-    public void ConnectChild(TStored parent, TStored child) {
+    public virtual void ConnectChild(TStored parent, TStored child) {
         Debug.Assert(nodeDirectory.ContainsKey(child), "Child isn’t listed in the forest as a node!");
         Debug.Assert(nodeDirectory.ContainsKey(parent), "Parent isn’t listed in the forest as a node!");
 
@@ -90,8 +126,8 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         TreeNode parentNode = nodeDirectory[parent];
 
         Debug.Assert(childNode.currentParent == null, "Trying to connect a child to a parent, but it already has a parent! Must call disconnect first!");
-        Debug.Assert(!AllParentsOf(parentNode).Contains(child), "We're trying to connect a child to a parent, but that child is a " +
-            "parent (of parent of parent) of that child! Incest/cycle violate the structure of the graph!");
+        Debug.Assert(!AllParentsOf(parentNode.self).Contains(child), "We're trying to connect a child to a parent, but that child is a " +
+            "parent (of parent of parent) of that child! Incest/cycle violate the structure of the graph! At " + parent + " and " + child);
 
         parentNode.children.Add(childNode);
         childNode.currentParent = parentNode;
@@ -100,10 +136,11 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
 
     /// <summary> Remove the connection (only the connection) from parent to child. This puts the child into the root. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void DisconnectFromParent(TStored child) => DisconnectFromParent(nodeDirectory[child]);
+    public virtual void DisconnectFromParent(TStored child) => DisconnectFromParent(nodeDirectory[child]);
     /// <summary> Remove the connection (only the connection) from parent to child. </summary>
-    private void DisconnectFromParent(TreeNode childNode) {
+    protected void DisconnectFromParent(TreeNode childNode) {
         TreeNode parentNode = childNode.currentParent;
+
         Debug.Assert(!(parentNode is null), "Trying to disconnect child from parent, but it doesn't have a parent!");
         parentNode.children.Remove(childNode);
         rootNodes.Add(childNode);
@@ -112,6 +149,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
 
     /// <summary> Remove the node associated with this entry. Update tree to reflect it. </summary>
     public void DeleteNode(TStored toDelete) {
+        Debug.Assert(nodeDirectory.ContainsKey(toDelete), "Trying to remove a node, but it isn't in the forest!");
         TreeNode nodeToDel = nodeDirectory[toDelete];
         for (int i = nodeToDel.children.Count - 1; i > -1; i--) {
             DisconnectFromParent(nodeToDel.children[i]);
@@ -119,17 +157,24 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         if (!(nodeToDel.currentParent is null)) nodeToDel.currentParent.children.Remove(nodeToDel);
 
         nodeDirectory.Remove(toDelete);
-        rootNodes.Remove(nodeToDel);
+        if (nodeToDel.currentParent is null) rootNodes.Remove(nodeToDel);
     }
 
     /// <summary> Sort the tree and all lists included following this function. This is a Func&lt;TStored, TStored, int&gt;
     /// that outputs 0 for x=y, -1 for x&lt;y, and 1 for y&lt;x. compare could be passed in as a Func instead of a Comparison.</summary>
     public void SortTree(Comparison<TStored> compare) {
-        Comparison<TreeNode> nodeCompare =
-            new Comparison<TreeNode>((TreeNode x, TreeNode y) => compare(x.self, y.self));
+        Comparison<TreeNode> nodeCompare = new Comparison<TreeNode>((TreeNode x, TreeNode y) => compare(x.self, y.self));
+        //foreach (TreeNode node in EnumerateBackwardsGraph())
+        //    node.children.Sort(nodeCompare); // Enumerate backwards because we're modifying the lists.
 
+        SortTree(nodeCompare);
+    }
+    /// <summary> Sort the tree and all lists included following this function. This is a Func&lt;TStored, TStored, int&gt;
+    /// that outputs 0 for x=y, -1 for x&lt;y, and 1 for y&lt;x. compare could be passed in as a Func instead of a Comparison.</summary>
+    protected virtual void SortTree(Comparison<TreeNode> nodeCompare) {
         rootNodes.Sort(nodeCompare);
-        foreach (TreeNode node in EnumerateBackwardsGraph()) node.children.Sort(nodeCompare); // Enumerate backwards because we're modifying the lists.
+        foreach (TreeNode node in EnumerateBackwardsGraph())
+            node.children.Sort(nodeCompare); // Enumerate backwards because we're modifying the lists.
     }
     #endregion
 
@@ -157,7 +202,8 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         yield break;
     }
 
-    /// <summary> Enumerate through all parents of the input obj, in order of (farthest from root) to root. If no parents, we’re just done.</summary>
+    /// <summary> Enumerate through all parents of the input obj, in order of (farthest from root)
+    /// to root. If no parents, we’re just done.</summary>
     public IEnumerable<TStored> AllParentsOf(TStored obj) {
         TreeNode current = nodeDirectory[obj];
         while (current.currentParent != null) {
@@ -166,18 +212,34 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         }
         yield break;
     }
+
+    /// <summary> Give a list of all in order of all treenodes that are a parent of this node
+    /// in order of self to root. INCLUDE self.</summary>
+    private List<TreeNode> AllParentNodesIncluding(TreeNode node) { // TODO better name
+        List<TreeNode> allParents = new List<TreeNode>() { node};
+        TreeNode current = node;
+        while (current.currentParent != null) {
+            current = current.currentParent;
+            allParents.Add(current);
+        }
+        return allParents;
+    }
+
     #endregion
 
     #region Enumerate through whole Forest
-    /// <summary> Enumerate through whole forest, including root, going depth-first, and in the order of all the lists' order. </summary>
+    /// <summary> Enumerate through whole forest, including root, going breadth-first, and in the order of all the lists' order. </summary>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    /// <summary> Enumerate through whole forest, including root, going breadth-first, and in the order of all the lists' order. </summary>
+    public IEnumerator<TStored> GetEnumerator() => EnumerateBreadthFirst().GetEnumerator();
+
     /// <summary> Enumerate through whole forest, including root, going depth-first, and in the order of all the lists' order. </summary>
-    public IEnumerator<TStored> GetEnumerator() {
+    public IEnumerable<TStored> EnumerateDepthFirst() {
         foreach (TreeNode node in GetGraphEnumerable())
             yield return node.self;
     }
     /// <summary> Enumerate through whole forest, including root, going depth-first, and in the order of all the lists' order. Return tree nodes. </summary>
-    private IEnumerable<TreeNode> GetGraphEnumerable() {
+    protected IEnumerable<TreeNode> GetGraphEnumerable() {
         foreach (TreeNode root in rootNodes) {
             foreach (TreeNode node in EnumThroughChild(root)) {
                 yield return node;
@@ -186,8 +248,31 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     }
 
 
-    
-    /// <summary> Enumerate through the whole tree, while returning a tuple, where the
+    /// <summary> Enumerate through forest breadth-first, in the order in which it was sorted. Is weirdly faster than depth-first. </summary>
+    public IEnumerable<TStored> EnumerateBreadthFirst() {
+        foreach (TreeNode node in GetGraphEnumerableBreadthFirst())
+            yield return node.self;
+    }
+    private Queue<TreeNode> breadthFirstQueue = new Queue<TreeNode>();
+    /// <summary> Enumerate through whole forest, including root, going BREADTH-first, and in the order of all the lists' order. Return tree nodes. </summary>
+    private IEnumerable<TreeNode> GetGraphEnumerableBreadthFirst() {
+        breadthFirstQueue.Clear();
+        // Queue up root.
+        foreach (TreeNode root in rootNodes) {
+            breadthFirstQueue.Enqueue(root);
+        }
+        // Go through, queuing up children as we get to them.
+        while (breadthFirstQueue.Count > 0) {
+            TreeNode node = breadthFirstQueue.Dequeue();
+            yield return node;
+            // queue children in order to do later.
+            foreach (TreeNode child in node.children) {
+                breadthFirstQueue.Enqueue(child);
+            }
+        }
+    }
+
+    /// <summary> Enumerate through the whole tree (depth-first), while returning a tuple, where the
     /// second entry is the depth from root. Root = 0. </summary>
     public IEnumerable<Tuple<TStored, int>> EnumerateWithDepth() {
         foreach (TreeNode root in rootNodes) {
@@ -207,6 +292,26 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         }
     }
 
+
+    /// <summary> Enumerate through the whole tree, while returning a tuples of all (Parent, Child) pairs.
+    /// Enumerate in a breadth-first way, so everything comes out in order of the sorting of the lists, and depth. </summary>
+    public IEnumerable<Tuple<TStored, TStored>> EnumerateParentChildPairs() { // TODO: Test
+        breadthFirstQueue.Clear();
+        // Queue up only nodes with parents.
+        foreach (TreeNode root in rootNodes) {
+            foreach (TreeNode child in root.children) {
+                breadthFirstQueue.Enqueue(child);
+            }
+        }
+        // Go through, queuing up children as we get to them.
+        while (breadthFirstQueue.Count > 0) {
+            TreeNode node = breadthFirstQueue.Dequeue();
+            yield return new Tuple<TStored, TStored>(node.currentParent.self, node.self);
+            foreach (TreeNode child in node.children) {
+                breadthFirstQueue.Enqueue(child);
+            }
+        }
+    }
 
 
     /// <summary> Enumerate through forest backwards. Go from farthest child to root, in the reverse order of the lists. </summary>
@@ -269,19 +374,25 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
             string currentString = string.Join("    ", new string[nodeData.Item2 + 1]) // Indent
                     + ((nodeData.Item2 == 0) ? ">" : "-"); // Use different bullet for roots,
             currentString += nodeData.Item1 == null ? "null" : nodeData.Item1.ToString();
-            Debug.Assert(!nodeStrings.ContainsKey(nodeData.Item1), nodeData.Item1 + " is a duplicate in the forest! we should not run a test suite on this!");
+            Debug.Assert(!nodeStrings.ContainsKey(nodeData.Item1), nodeData.Item1 +
+                " is a duplicate in the forest! we should not run a test suite on this!");
             nodeStrings[nodeData.Item1] = currentString;
         }
 
-        sb.Append("\nMain Enumerator :\n");
+        sb.Append("\nMain (depth-first) Enumerator :\n");
         foreach (TStored node in this) {
+            sb.Append(nodeStrings[node]); sb.Append("\n");
+        }
+
+        sb.Append("\n Breadth-First Enumerator :\n");
+        foreach (TStored node in EnumerateBreadthFirst()) {
             sb.Append(nodeStrings[node]); sb.Append("\n");
         }
 
 
         sb.Append("\nIterate Backwards:\n");
         foreach (TreeNode node in EnumerateBackwardsGraph()) {
-            sb.Append(nodeStrings[node]); sb.Append("\n");
+            sb.Append(nodeStrings[node.self]); sb.Append("\n");
         }
 
 
@@ -304,16 +415,16 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
 
         void PrintParentAndChildren(TreeNode node) {
             sb.Append($"Analyzing {node}:\n     Direct children: ");
-            foreach (TStored child in DirectChildrenOf(node)) {
+            foreach (TStored child in DirectChildrenOf(node.self)) {
                 AddSimpleNodeString(child);
             }
             sb.Append($"\n     All children: ");
-            foreach (TStored child in AllChildrenOf(node)) {
+            foreach (TStored child in AllChildrenOf(node.self)) {
                 AddSimpleNodeString(child);
             }
             sb.Append($"\n     Parent: " + (node.currentParent == null ? "null" : node.currentParent));
             sb.Append($"\n     All Parents: ");
-            foreach (TStored parent in AllParentsOf(node)) {
+            foreach (TStored parent in AllParentsOf(node.self)) {
                 AddSimpleNodeString(parent);
             }
 
@@ -390,3 +501,100 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     #endregion
 
 }
+
+
+#region Sorted Forest
+// TODO: Untested
+/// <summary>This is a ForestGraph that automatically maintains a list of points where the forest
+/// has been modified to make sorting it more efficient.</summary>
+public class ForestGraphSorted<TStored> : ForestGraph<TStored> where TStored : class {
+    /// <summary>This is a function to automatically compare when sorting.</summary>
+    private Comparison<TreeNode> defaultCompare = null;
+    /// <summary>Assign a function to be automatically used for sorting the forest.</summary>
+    public void AssignDefaultComparison(Comparison<TStored> compare) {
+        defaultCompare = new Comparison<TreeNode>((TreeNode x, TreeNode y) => compare(x.self, y.self));
+        newCompareAssigned = true;
+    }
+
+    /// <summary> List of all tree</summary>
+    private List<TreeNode> nodesPendingSort = new();
+    /// <summary> TRUE => we still need to sort root.</summary>
+    private bool rootSortPending = false;
+    /// <summary>This is set true whenever a new comparison is assigned, to make us sort the whole forest. </summary>
+    private bool newCompareAssigned = false;
+    /// <summary> TRUE => Forest is fully sorted. </summary>
+    public bool IsSorted => !rootSortPending && nodesPendingSort.Count == 0 && !newCompareAssigned;
+
+    public ForestGraphSorted(Comparison<TStored> compare) => AssignDefaultComparison(compare);
+
+    #region Extend parent graph-modifying methods
+    public override void Clear() {
+        base.Clear();
+        nodesPendingSort.Clear();
+        rootSortPending = false;
+    }
+
+    public override void AddAtRoot(TStored obj) {
+        base.AddAtRoot(obj);
+        rootSortPending = true;
+    }
+
+    public override void ConnectChild(TStored parent, TStored child) {
+        base.ConnectChild(parent, child);
+        nodesPendingSort.Add(nodeDirectory[parent]);
+        rootSortPending = true;
+    }
+
+   public override void DisconnectFromParent(TStored child) {
+        TreeNode childNode = nodeDirectory[child];
+        nodesPendingSort.Add(childNode.currentParent);
+        base.DisconnectFromParent(childNode);
+        rootSortPending = true;
+    }
+    #endregion
+
+    #region Unique sorting methods
+    /// <summary> Sort the tree and all lists, trying to sort just points that changed,
+    /// using the comparison assigned into the forest. </summary>
+    public void SortTree() {
+        // If we assigned a new default comparison (or we have a LOT of nodes to deal with,
+        // then we just need to sort the whole graph.
+        if (newCompareAssigned
+            || (nodesPendingSort.Count > Count / 2)) {
+            base.SortTree(defaultCompare);
+            newCompareAssigned = false;
+            rootSortPending = false;
+            nodesPendingSort.Clear();
+            return;
+        }
+
+        if (rootSortPending) {
+            rootNodes.Sort(defaultCompare);
+        }
+
+        // Sort each pending node, and use .Distinct to try to avoid double sorting.
+        foreach (TreeNode node in nodesPendingSort.Distinct()) {
+            node.children.Sort(defaultCompare);
+        }
+
+        rootSortPending = false;
+        nodesPendingSort.Clear();
+    }
+    #endregion
+
+    /// <summary> Assert that the graph is currently sorted. Hard full check.
+    /// Only used for debugging purposes.</summary>
+    public void DebugCheckSorted() {
+        foreach (TreeNode node in GetGraphEnumerable()) {
+            List<TreeNode> expectedList = node.children.ToList();
+            expectedList.Sort(defaultCompare);
+            Debug.Assert(expectedList.SequenceEqual(node.children), "Children of " + node + " are not sorted!");
+        }
+
+        List<TreeNode> expectedRoot = rootNodes.ToList();
+        expectedRoot.Sort(defaultCompare);
+        Debug.Assert(expectedRoot.SequenceEqual(rootNodes), "Root is not sorted.");
+    }
+
+}
+#endregion
