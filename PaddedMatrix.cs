@@ -37,7 +37,7 @@ public class PaddedMatrix<TStored> : IEnumerable {
     /// <summary>Give the padded dimensions</summary>
     public Vector2Int PaddedSize => new Vector2Int(matrix.GetLength(0), matrix.GetLength(1));
 
-    /// <summary> Goto all non-null vertices in matrix. </summary>
+    /// <summary> Enumerate all non-null entries in matrix. </summary>
     IEnumerator IEnumerable.GetEnumerator() {
         for (int x = padding - 1; x < matrix.GetLength(0) - padding; x++) {
             for (int y = padding - 1; y < matrix.GetLength(1) - padding; y++) {
