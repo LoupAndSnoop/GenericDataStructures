@@ -1,0 +1,134 @@
+using UnityEngine;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using LoupExtensionMethods.Structs;
+
+/// <summary>Basic struct representing a rectangle. We store primarily based on min and max.
+/// Focus on min/max instead of center/size.</summary>
+[System.Serializable]
+public struct Bounds2 {
+    /// <summary>Top left corner.</summary>
+    public Vector2 max { get; private set; }
+    /// <summary>Bottom right corner.</summary>
+    public Vector2 min { get; private set; }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bounds2(Vector2 min, Vector2 max) { this.max = max; this.min = min;
+        Debug.Assert(IsValid, "Constructing a Bounds2 with invalid input! min should be less than max!"); }
+
+    /// <summary>Construct an instance based on center and size.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Bounds2 MakeByCenterSize(Vector2 center, Vector2 size)
+        => new Bounds2(center - size * 0.5f, center + size * 0.5f);
+
+    #region Basic accessors
+    /// <summary>Center of the bounds.</summary>
+    public Vector2 Center => (max + min) * 0.5f;
+    /// <summary>Size of the bounds</summary>
+    public Vector2 Size => max - min;
+    /// <summary>Size of the bounds</summary>
+    public float Area => Size.x * Size.y;
+    /// <summary>Return TRUE if the bounds actually has valid insides (eg min should be below max...)</summary>
+    public bool IsValid => min.x.ApproxLessThan(max.x) && min.y.ApproxLessThan(max.y);
+    #endregion
+
+    #region Basic bounds logic
+    /// <summary>Return true if the point is inside of the bounds (or is APPROXIMATELY on the borders).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(Vector2 point) => point.x.WeakGreaterThan(min.x) && point.x.WeakLessThan(max.x)
+            && point.y.WeakGreaterThan(min.y) && point.y.WeakLessThan(max.y);
+
+    /// <summary>Return the closest point within bounds to the given point.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Vector2 ClosestPoint(Vector2 point) =>
+        new Vector2(Mathf.Max(Mathf.Min(point.x, max.x),min.x), Mathf.Max(Mathf.Min(point.y, max.y), min.y));
+    #endregion
+
+    #region Bounds operations
+    /// <summary>Give a new Bounds2 where all values are rounded outwards to integer values. The bounds will grow.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bounds2 RoundOutwards() => new Bounds2(min.FloorToInt(), max.CeilToInt());
+    /// <summary>Give a new Bounds2 where all values are rounded inwards to integer values. The bounds will shrink </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bounds2 RoundInwards() => new Bounds2(min.CeilToInt(), max.FloorToInt());
+    /// <summary>Give a new Bounds2 where the center is the same, but the size grows by this much
+    /// Expand by 1 => grow  by 0.5f outward in every direction. The factor can be negative
+    /// to cause shrink, in which case you should check IsValid.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Bounds2 Expand(float factor) => new Bounds2(min + 0.5f * factor * Vector2.one, max + 0.5f * factor * Vector2.one);
+
+    /// <summary>Give a new Bounds that represents the UNION of two bounds objects.</summary>
+    public Bounds2 Union(Bounds2 bounds) => new Bounds2(min.Min(bounds.min), max.Max(bounds.max));
+
+    /// <summary>Give a new Bounds that represents the INTERSECTION of two bounds objects.
+    /// Warning! The output might not be valid in case of null intersection. Use the IsValid field to
+    /// check for null intersection!</summary>
+    public Bounds2 Intersection(Bounds2 bounds) => new Bounds2(min.Max(bounds.min), max.Min(bounds.max));
+    #endregion
+
+    #region Operator overloads
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool operator ==(Bounds2 lhs, Bounds2 rhs) => (lhs.max == rhs.max) && (lhs.min == rhs.min);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool operator !=(Bounds2 lhs, Bounds2 rhs) => !(lhs == rhs);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override int GetHashCode() => min.GetHashCode() + max.GetHashCode() << 6;
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public override bool Equals(object obj) {
+        if ((obj == null) || !this.GetType().Equals(obj.GetType())) {
+            return false;
+        }
+        return (this == (Bounds2)obj);
+    }
+    #endregion
+
+    #region Casting
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static implicit operator Bounds(Bounds2 bounds)
+        => new Bounds(new Vector3((bounds.max.x + bounds.min.x) * 0.5f, (bounds.max.y + bounds.min.y) * 0.5f, 0f),
+                      new Vector3(bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, 0f));
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static explicit operator Bounds2(Bounds bounds) => new Bounds2(bounds.min, bounds.max);
+    #endregion
+
+    #region Enumerators
+    /// <summary>Enumerate through all Vector2Int that are in the bounds. </summary>
+    public IEnumerable<Vector2Int> EnumerateContainedLattice() {
+        Debug.Assert(IsValid, "Cannot enumerate on invalid bounds!");
+        Vector2Int latticeMin = min.CeilToInt();
+        Vector2Int latticeMax = max.FloorToInt();
+        for (int x = latticeMin.x; x <= latticeMax.x; x++) {
+            for (int y = latticeMin.y; y <= latticeMax.y; y++) {
+                yield return new Vector2Int(x, y);
+            }
+        }
+    }
+
+    #endregion
+
+    #region Debugging
+    public override string ToString() => $"Min={min}, max={max}";
+
+    /// <summary>Debug draw a rectangle representing the bounds. </summary>
+    public void DebugDrawBounds(Color color, float duration = 0f) {
+        Vector2 cornerUL = new Vector2(min.x, max.y);
+        Vector2 cornerDR = new Vector2(max.x, min.y);
+        Debug.DrawLine(min, cornerUL, color, duration);
+        Debug.DrawLine(cornerUL, max, color, duration);
+        Debug.DrawLine(max, cornerDR, color, duration);
+        Debug.DrawLine(cornerDR, min, color, duration);
+    }
+#if UNITY_EDITOR
+    /// <summary>Draw the bounds as a gizmo. </summary>
+    public void GizmoDrawBounds(Color color) {
+        Gizmos.color = color;
+        Vector2 cornerUL = new Vector2(min.x, max.y);
+        Vector2 cornerDR = new Vector2(max.x, min.y);
+        Gizmos.DrawLine(min, cornerUL);
+        Gizmos.DrawLine(cornerUL, max);
+        Gizmos.DrawLine(max, cornerDR);
+        Gizmos.DrawLine(cornerDR, min);
+    }
+#endif
+    #endregion
+}
