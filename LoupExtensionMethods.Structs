@@ -1,0 +1,172 @@
+    namespace Structs {
+        #region Extensions to basic structs
+        public static class StructExtensions {
+            private const float FLOAT_INEQUALITY_THRESHOLD = 1E-6f;
+
+            /// <summary>Give a new Bounds that represents the UNION of two bounds objects.</summary>
+            public static Bounds Union(this Bounds bounds1, Bounds bounds2) {
+                Vector3 newMin = bounds1.min.Min(bounds2.min);
+                Vector3 newMax = bounds1.max.Max(bounds2.max);
+                return new Bounds((newMin + newMax) * 0.5f, newMax - newMin);
+            }
+
+            /// <summary>Give a new Bounds that represents the INTERSECTION of two bounds objects.</summary>
+            public static Bounds Intersection(this Bounds bounds1, Bounds bounds2) {
+                // Min and max of individual bounds
+                Vector3 newMin = bounds1.min.Max(bounds2.min);
+                Vector3 newMax = bounds1.max.Min(bounds2.max);
+                // Now we need to check if we have null intersection
+                if (newMin.x - newMax.x > FLOAT_INEQUALITY_THRESHOLD
+                    || newMin.y - newMax.y > FLOAT_INEQUALITY_THRESHOLD
+                    || newMin.z - newMax.z > FLOAT_INEQUALITY_THRESHOLD) {
+                    return default;
+                }
+
+                // If we DO have intersection, then we're good for the normal formula
+                return new Bounds((newMin + newMax) * 0.5f, newMax - newMin);
+            }
+
+            /// <summary>Give a new Bounds that represents a continuous equivalent of our BoundsInt.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Bounds ToContBounds(this BoundsInt boundsInt) => new Bounds(boundsInt.center, boundsInt.size);
+            /// <summary>Give a new Bounds that is made to be 2D. It has zero Z size,and Z center = 0. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Bounds To2D(this Bounds bounds) => new Bounds((Vector2)bounds.center, (Vector2)bounds.size);
+
+            /// <summary>Give a new Bounds where all values are rounded outwards to integer values. The bounds will grow.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Bounds RoundOutwards(this Bounds bounds) {
+                Vector3 max = bounds.max.CeilToInt();
+                Vector3 min = bounds.min.FloorToInt();
+                return new Bounds((max + min) * 0.5f, max - min);
+            }
+            /// <summary>Give a new Bounds where all values are rounded inwards to integer values. The bounds will shrink </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Bounds RoundInwards(this Bounds bounds) {
+                Vector3 max = bounds.max.FloorToInt();
+                Vector3 min = bounds.min.CeilToInt();
+                return new Bounds((max + min) * 0.5f, max - min);
+            }
+
+
+            #region Vector Extensions
+
+            //////// Min/Max
+            /// <summary>Give a Vector3 where each individual component is the min of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector3 Min(this Vector3 vec1, Vector3 vec2)
+                => new Vector3(Mathf.Min(vec1.x, vec2.x), Mathf.Min(vec1.y, vec2.y), Mathf.Min(vec1.z, vec2.z));
+            /// <summary>Give a Vector3 where each individual component is the max of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector3 Max(this Vector3 vec1, Vector3 vec2)
+                => new Vector3(Mathf.Max(vec1.x, vec2.x), Mathf.Max(vec1.y, vec2.y), Mathf.Max(vec1.z, vec2.z));
+            /// <summary>Give a Vector2 where each individual component is the min of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2 Min(this Vector2 vec1, Vector2 vec2)
+                => new Vector2(Mathf.Min(vec1.x, vec2.x), Mathf.Min(vec1.y, vec2.y));
+            /// <summary>Give a Vector2 where each individual component is the max of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2 Max(this Vector2 vec1, Vector2 vec2)
+                => new Vector2(Mathf.Max(vec1.x, vec2.x), Mathf.Max(vec1.y, vec2.y));
+            /// <summary>Give a Vector2 where each individual component is the min of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2Int Min(this Vector2Int vec1, Vector2Int vec2)
+                => new Vector2Int(Math.Min(vec1.x, vec2.x), Math.Min(vec1.y, vec2.y));
+            /// <summary>Give a Vector2 where each individual component is the max of the the two vectors.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2Int Max(this Vector2Int vec1, Vector2Int vec2)
+                => new Vector2Int(Math.Max(vec1.x, vec2.x), Math.Max(vec1.y, vec2.y));
+
+
+            /// <summary>Give a Vector3 where each individual component is ceilinged to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector3Int CeilToInt(this Vector3 vec) => new Vector3Int(Mathf.CeilToInt(vec.x), Mathf.CeilToInt(vec.y), Mathf.CeilToInt(vec.z));
+            /// <summary>Give a Vector2 where each individual component is ceilinged to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2Int CeilToInt(this Vector2 vec) => new Vector2Int(Mathf.CeilToInt(vec.x), Mathf.CeilToInt(vec.y));
+            /// <summary>Give a Vector3 where each individual component is floored to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector3Int FloorToInt(this Vector3 vec) => new Vector3Int(Mathf.FloorToInt(vec.x), Mathf.FloorToInt(vec.y), Mathf.FloorToInt(vec.z));
+            /// <summary>Give a Vector2 where each individual component is floored to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2Int FloorToInt(this Vector2 vec) => new Vector2Int(Mathf.FloorToInt(vec.x), Mathf.FloorToInt(vec.y));
+            /// <summary>Give a Vector3 where each individual component is rounded to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector3Int RoundToInt(this Vector3 vec) => new Vector3Int(Mathf.RoundToInt(vec.x), Mathf.RoundToInt(vec.y), Mathf.RoundToInt(vec.z));
+            /// <summary>Give a Vector2 where each individual component is rounded to an int value. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static Vector2Int RoundToInt(this Vector2 vec) => new Vector2Int(Mathf.RoundToInt(vec.x), Mathf.RoundToInt(vec.y));
+
+            /// <summary>Manhattan norm of the vector. Counts +1 distance per step in any x/y component. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int ManhattanNorm(this Vector2Int vec) => Math.Abs(vec.x) + Math.Abs(vec.y);
+            /// <summary>Manhattan norm of the vector. Counts +1 distance per step in any x/y/z component. </summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static int ManhattanNorm(this Vector3Int vec) => Math.Abs(vec.x) + Math.Abs(vec.y) + Math.Abs(vec.z);
+
+            /// <summary>Enumerate all Vector3Int with a manhattan norm up to (or equal to) maxDistance. </summary>
+            public static IEnumerable<Vector3Int> EnumerateWithinManhattanNorm(this Vector3Int vec, int maxDist) {
+                Debug.Assert(maxDist >= 0, "Manhattan norm cannot be negative, dumbass.");
+                int minZ = vec.z - maxDist; int maxZ = vec.z + maxDist;
+                for (int z = minZ; z <= maxZ; z++) {
+
+                    int minY = vec.y - (maxDist - Math.Abs(vec.z - z));
+                    int maxY = vec.y + (maxDist - Math.Abs(vec.z - z));
+                    for (int y = minY; y <= maxY; y++) {
+
+                        int minX = vec.x - (maxDist - Math.Abs(vec.z - z) - Math.Abs(vec.y - y));
+                        int maxX = vec.x + (maxDist - Math.Abs(vec.z - z) - Math.Abs(vec.y - y));
+                        for (int x = minX; x <= maxX; x++) {
+                            yield return new Vector3Int(x, y, z);
+                        }
+                    }
+                }
+            }
+            /// <summary>Enumerate all Vector2Int with a Manhattan norm up to (or equal to) maxDistance. </summary>
+            public static IEnumerable<Vector2Int> EnumerateWithinManhattanNorm(this Vector2Int vec, int maxDist) {
+                Debug.Assert(maxDist >= 0, "Manhattan norm cannot be negative, dumbass.");
+                int minX = vec.x - maxDist; int maxX = vec.x + maxDist;
+                for (int x = minX; x <= maxX; x++) {
+
+                    int minY = vec.y - (maxDist - Math.Abs(vec.x - x));
+                    int maxY = vec.y + (maxDist - Math.Abs(vec.x - x));
+                    for (int y = minY; y <= maxY; y++) {
+                        yield return new Vector2Int(x, y);
+                    }
+                }
+            }
+
+            /// <summary>Return the unsigned angle, for going from vecFrom to vecTo, forcing us to
+            /// go counterclockwise (out of screen). Angles can be >180 deg, and should be able to go around.
+            /// Vector2.right.ClockwiseAngleTo(Vector2.Up) = 90f. </summary>
+            public static float CounterClockwiseAngleTo(this Vector2 vecFrom, Vector2 vecTo) {
+                // Signed angle from Vector2.up to direction gives -45 deg at UpRight, and 45 deg at UpLeft...
+                float angle = Vector2.SignedAngle(vecFrom, vecTo);
+                // Fix the issue of signed angles. Make angle increase from 0 to 360 going clockwise
+                if (angle < 0) { angle += 360f; }
+                return angle;
+            }
+
+
+            #endregion
+
+            #region Float extensions
+            /// <summary>Check if float is strictly LESS than another float, filtering out if two floats are approximately equal.
+            /// Same as lhs &lt; rhs, but smarter.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static bool ApproxLessThan(this float lhs, float rhs) => FLOAT_INEQUALITY_THRESHOLD < rhs - lhs;
+            /// <summary>Check if float is strictly GREATER than another float, filtering out if two floats are approximately equal.
+            /// Same as lhs &gt; rhs, but smarter.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static bool ApproxGreaterThan(this float lhs, float rhs) => FLOAT_INEQUALITY_THRESHOLD < lhs - rhs;
+
+            /// <summary>Check if float is weakly LESS than or equal to another float, including if two floats are approximately equal.
+            /// Same as lhs &lt;= rhs, but with smarter equality.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static bool WeakLessThan(this float lhs, float rhs) => -FLOAT_INEQUALITY_THRESHOLD < rhs - lhs;
+            /// <summary>Check if float is weakly GREATER than or equal to another float, including if two floats are approximately equal.
+            /// Same as lhs &gt;= rhs, but with smarter equality.</summary>
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            public static bool WeakGreaterThan(this float lhs, float rhs) => -FLOAT_INEQUALITY_THRESHOLD < lhs - rhs;
+            #endregion
+        }
