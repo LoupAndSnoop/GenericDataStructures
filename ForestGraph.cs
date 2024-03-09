@@ -5,6 +5,48 @@ using System;
 using System.Linq;
 using System.Runtime.CompilerServices;
 
+#region Readonly Intrerface
+/// <summary>Expose a forest graph's basic accessors without exposing anything to modify it.</summary>
+public interface IReadOnlyForest<TStored> : IEnumerable<TStored> {
+    /// <summary> Total entries in forest </summary>
+    public int Count { get; }
+    /// <summary> Return the number of parents this entry has. </summary>
+    public int GetDepthOf(TStored entry);
+
+    //////Query contents
+    /// <summary> True if forest contains this entry. </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool Contains(TStored content);
+    /// <summary> Give the current parent of this. If no parent (in root), return null. </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public TStored ParentOf(TStored child);
+    /// <summary> Give the number of direct children this parent has. </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int DirectChildCountOf(TStored parent);
+    /// <summary> Give an IEnumerable to enumerate through all of an entry's DIRECT children. </summary>
+    public IEnumerable<TStored> DirectChildrenOf(TStored parent);
+    /// <summary>Return TRUE if potential parent is a parent (or grandparent etc) of potential child. Is fast.
+    /// potentialParent need not be in the forest, but potentialChild must be (assert this).
+    /// Returns false if potentialChild == potentialParent.</summary>
+    public bool IsIndirectParentOf(TStored potentialParent, TStored potentialChild);
+
+
+    //////// Enumeration
+    /// <summary> Enumerate through ALL children of the input obj, including grandchildren etc. Skip self by default. Depth-first. </summary>
+    public IEnumerable<TStored> AllChildrenOf(TStored parent, bool includeSelf = false);
+    /// <summary> Enumerate (parent,child) pairs through self and ALL children of the input obj, including grandchildren etc.,
+    /// breadth first. Allocate our own queue to allow to allow multiple separate enumerations at once.</summary>
+    public IEnumerable<(TStored parent, TStored child)> EnumeratePairsFrom(TStored initialParent);
+    /// <summary> Enumerate through all parents of the input obj, in order of (farthest from root)
+    /// to root. If no parents, we’re just done.</summary>
+    public IEnumerable<TStored> AllParentsOf(TStored obj);
+
+    /// <summary>Compare stored objects obj1 and obj2. Return the -1 if obj1 comes out first, and 1 if obj2 comes out first,
+    /// when enumerating breadth first. This isn't super fast, so don't spam this.</summary>
+    public int CompareBreadthFirstOrder(TStored obj1, TStored obj2);
+}
+#endregion
+
 /// <summary> This is a generic data structure that represents a forest. This is a graph where every
 /// subgraph is a part of a tree. In this data structure, we store TStored in this structure, where there are direct parent-child
 /// relationships. There is a list of "root" nodes, which are the entries that have no parents.
@@ -14,12 +56,15 @@ using System.Runtime.CompilerServices;
 /// 2) Use ConnectChild/DisconnectChild to modify the connections of "what is the child of what." 
 /// 3) Then, we can query the forest to: see its contents, check connectivity, check how deep an entry is, find parents/children,
 /// and efficiently enumerate through all the contents. </para> </summary>
-/// <typeparam name="TStored">The type stored in the forest. Must be a class so we can check == null.</typeparam>
-public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
+/// <typeparam name="TStored">The type stored in the forest. We check == default to know if there is no parent. It is recommended for TStored default to be null.</typeparam>
+public class ForestGraph<TStored> : IEnumerable<TStored>, IReadOnlyForest<TStored> {// where TStored : class {
     /// <summary> List of all the nodes in the root (ie have no parent) </summary>
     protected List<TreeNode> rootNodes = new List<TreeNode>();
     /// <summary> Directory that links every entry we are storing to its node. </summary>
     protected Dictionary<TStored, TreeNode> nodeDirectory = new Dictionary<TStored, TreeNode>();
+
+    // Queues for non-alloc enumeration.
+    private Queue<TreeNode> breadthFirstQueue = new Queue<TreeNode>();
 
     /// <summary> This is the main interior data structure that 1) holds the entry in the forest,
     /// and 2) holds information about what it is immediately connected to. This is like
@@ -29,6 +74,8 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         public TStored self;
         /// <summary> The node which is our direct current parent. == null => we have no parent, and are in root. </summary>
         public TreeNode currentParent = null;
+        /// <summary>Get the value of the current parent. If there is no parent, return default.</summary>
+        public TStored CurrentParentValue => currentParent == null ? default : currentParent.self;
         /// <summary> List of all nodes which are DIRECT children. No grandchildren etc. </summary>
         public List<TreeNode> children = new List<TreeNode>();
 
@@ -40,6 +87,30 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         public override string ToString() => self.ToString();
     }
 
+    #region Constructor(s)
+    /// <summary>Make empty forest.</summary>
+    public ForestGraph() {
+        Debug.Assert(default(TStored) == null, "ForestGraph should only be used with types where the default is null!");
+    }
+
+    /// <summary>Generate a forest graph using a collection of parent-child pairs.
+    /// For entries into the root, make the parent entry null. Format as (parent, child)</summary>
+    public ForestGraph(ICollection<Tuple<TStored, TStored>> parentChildPairs) {
+        Debug.Assert(default(TStored) == null, "ForestGraph should only be used with types where the default is null!");
+
+        // First put everything into the root.
+        foreach (Tuple<TStored, TStored> parentChildPair in parentChildPairs) {
+            AddAtRoot(parentChildPair.Item2);
+        }
+        // Now link as needed
+        foreach ((TStored parent, TStored child) in parentChildPairs) {
+            if (parent != null) {
+                ConnectChild(parent, child);
+            }
+        }
+    }
+    #endregion
+
     #region Basic accessors (typical of IEnumerables)
     /// <summary> True if forest contains this entry. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -49,9 +120,9 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     /// <summary> Clear the contents of the forest. </summary>
     public virtual void Clear() { nodeDirectory.Clear(); rootNodes.Clear(); }
 
-    /// <summary> Give the current parent of this. If no parent (in root), return null. </summary>
+    /// <summary> Give the current parent of this. If no parent (in root), return null (or default value for value types). </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TStored ParentOf(TStored child) => nodeDirectory[child].currentParent?.self;
+    public TStored ParentOf(TStored child) => nodeDirectory[child].CurrentParentValue; //=>nodeDirectory[child].currentParent?.self;
 
     /// <summary> Give the number of direct children this parent has. </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -69,6 +140,20 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         foreach (TStored x in AllParentsOf(entry)) depth++;
         return depth;
     }
+
+    /// <summary>Return TRUE if potential parent is a parent (or grandparent etc) of potential child. Is fast.
+    /// potentialParent need not be in the forest, but potentialChild must be (assert this).
+    /// Returns false if potentialChild == potentialParent.</summary>
+    public bool IsIndirectParentOf(TStored potentialParent, TStored potentialChild) {
+        Debug.Assert(nodeDirectory.ContainsKey(potentialChild), "Can't call IsParentOf unless the child is actually in the graph!");
+        TreeNode currentNode = nodeDirectory[potentialChild];
+        while (currentNode.currentParent != null) {
+            if (currentNode.currentParent.self.Equals(potentialParent)) return true;
+            currentNode = currentNode.currentParent; // Keep going back up
+        }
+        return false; // Didn't find it.
+    }
+
     #endregion
 
     #region Order-based accessors
@@ -77,7 +162,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     public int CompareBreadthFirstOrder(TStored obj1, TStored obj2) { // TODO: Untested.
         Debug.Assert(nodeDirectory.ContainsKey(obj1), "First argument isn't in the forest graph!");
         Debug.Assert(nodeDirectory.ContainsKey(obj2), "First argument isn't in the forest graph!");
-        Debug.Assert(obj1 != obj2, "Can't compare two of the same object! I could return 0, but this is probably a mistake!");
+        Debug.Assert(!obj1.Equals(obj2), "Can't compare two of the same object! I could return 0, but this is probably a mistake!");
 
         List<TreeNode> nodeLineage1 = AllParentNodesIncluding(nodeDirectory[obj1]);
         List<TreeNode> nodeLineage2 = AllParentNodesIncluding(nodeDirectory[obj2]);
@@ -103,8 +188,6 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         Debug.LogError("The comparison method should have resolved its comparison before that loop ends!");
         return 0;
     }
-
-
     #endregion
 
     #region Modify the Contents of the Forest
@@ -179,7 +262,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     #endregion
 
     #region Enumerate From one node
-    /// <summary> Return this node AND all the children of it </summary>
+    /// <summary> Return this node AND all the children of it. DepthFirst </summary>
     private IEnumerable<TreeNode> EnumThroughChild(TreeNode parent) {
         yield return parent;
         foreach (TreeNode childNode in parent.children) {
@@ -191,15 +274,50 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
     }
 
 
-    /// <summary> Enumerate through ALL children of the input obj, including grandchildren etc </summary>
-    public IEnumerable<TStored> AllChildrenOf(TStored parent) {
+    /// <summary> Enumerate through ALL children of the input obj, including grandchildren etc. Skip self by default. Depth-first. </summary>
+    public IEnumerable<TStored> AllChildrenOf(TStored parent, bool includeSelf = false) {
         IEnumerator<TreeNode> enumeratorWithSelf = EnumThroughChild(nodeDirectory[parent]).GetEnumerator();
 
-        enumeratorWithSelf.MoveNext(); // Skip self
+        if (!includeSelf) enumeratorWithSelf.MoveNext(); // Skip self
         while (enumeratorWithSelf.MoveNext()) {
             yield return enumeratorWithSelf.Current.self;
         }
         yield break;
+    }
+
+    /// <summary> Enumerate through self and ALL children of the input obj, including grandchildren etc., breadth first.
+    /// Allocate our own queue to allow to allow multiple separate enumerations at once.</summary>
+    public IEnumerable<TStored> EnumerateBreadthFirstFrom(TStored parent) {
+        Debug.Assert(nodeDirectory.ContainsKey(parent), "Cannot enumerate through children of something that is not in the graph!");
+
+        TreeNode initialNode = nodeDirectory[parent];
+        Queue<TreeNode> pendingQueue = new(initialNode.children.Count + 1);
+        pendingQueue.Enqueue(initialNode);
+
+        // Go through, queuing up children as we get to them.
+        while (breadthFirstQueue.Count > 0) {
+            TreeNode node = breadthFirstQueue.Dequeue();
+            yield return node.self;
+            // queue children in order to do later.
+            foreach (TreeNode child in node.children) {
+                breadthFirstQueue.Enqueue(child);
+            }
+        }
+    }
+
+    /// <summary> Enumerate (parent,child) pairs through self and ALL children of the input obj, including grandchildren etc.,
+    /// breadth first. Allocate our own queue to allow to allow multiple separate enumerations at once.</summary>
+    public IEnumerable<(TStored parent, TStored child)> EnumeratePairsFrom(TStored initialParent) {
+        TreeNode currentNode = nodeDirectory[initialParent];
+        Queue<TreeNode> breadthFirstQueue = new(currentNode.children.Count + 1);
+        breadthFirstQueue.Enqueue(currentNode);
+        while (breadthFirstQueue.Count > 0) {
+            currentNode = breadthFirstQueue.Dequeue();
+            yield return (currentNode.CurrentParentValue, currentNode.self);
+            //yield return (currentNode.currentParent?.self, currentNode.self);
+            foreach (TreeNode childNode in currentNode.children)
+                breadthFirstQueue.Enqueue(childNode);
+        }
     }
 
     /// <summary> Enumerate through all parents of the input obj, in order of (farthest from root)
@@ -253,7 +371,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         foreach (TreeNode node in GetGraphEnumerableBreadthFirst())
             yield return node.self;
     }
-    private Queue<TreeNode> breadthFirstQueue = new Queue<TreeNode>();
+    
     /// <summary> Enumerate through whole forest, including root, going BREADTH-first, and in the order of all the lists' order. Return tree nodes. </summary>
     private IEnumerable<TreeNode> GetGraphEnumerableBreadthFirst() {
         breadthFirstQueue.Clear();
@@ -406,7 +524,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
         PrintParentAndChildren(enumCheck.Current);
 
         sb.Append("\n\nTerminal node:");
-        Tuple<TStored, int> farthestNode = new Tuple<TStored, int>(null, -1);
+        Tuple<TStored, int> farthestNode = new Tuple<TStored, int>(default, -1);
         foreach (Tuple<TStored, int> depthCheck in EnumerateWithDepth()) {
             if (depthCheck.Item2 > farthestNode.Item2) farthestNode = depthCheck;
         }
@@ -503,7 +621,7 @@ public class ForestGraph<TStored> : IEnumerable<TStored> where TStored : class {
 }
 
 
-#region Sorted Forest
+#region Sorted Tree
 // TODO: Untested
 /// <summary>This is a ForestGraph that automatically maintains a list of points where the forest
 /// has been modified to make sorting it more efficient.</summary>
