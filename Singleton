@@ -1,0 +1,58 @@
+using UnityEngine;
+
+//  Code from:
+// https://www.youtube.com/watch?v=ErJgQY5smnw&t=3s
+
+/// <summary> If you don't already understand this class, you can't be trusted to use it. </summary>
+public abstract class Singleton<T> : MonoBehaviour where T : Component {
+    private static T instance;
+
+    protected static bool DontDestroy = true;
+    private static bool m_applicationIsQuitting = false;
+    private void OnApplicationQuit() => m_applicationIsQuitting = true;
+
+    /// <summary> If the instance is defined, go get it. If not, go make it, unless the application is quitting. </summary>
+    public static T GetInstance() {
+        //if (ApplicationLifecycle.quitting) return null;
+        if (m_applicationIsQuitting) { return null; }
+
+        if (instance == null) {
+            instance = FindObjectOfType<T>();
+            if (instance == null) {
+                GameObject obj = new GameObject();
+                obj.name = typeof(T).Name;
+                instance = obj.AddComponent<T>();
+            }
+            // Loup for debugging
+            //callingType = new StackTrace().GetFrame(1).GetMethod().DeclaringType;
+        }
+        return instance;
+    }
+
+    /// <summary> If the instance is defined (and application not qutting), return TRUE and out the instance.
+    /// Else, return FALSE and out null. This is like GetInstance, but does NOT try to instantiate
+    /// the instance if it does not exist. Mostly call this when application is quitting, or if singleton can be destroyed.</summary>
+    public static bool TryGetInstance(out T inst) {
+        if (m_applicationIsQuitting || instance == null) { inst = null; return false; }
+        inst = instance; return true;
+    }
+
+    /* IMPORTANT!!! To use Awake in a derived class you need to do it this way
+     * protected override void Awake()
+     * {
+     *     base.Awake();
+     *     //Your code goes here
+     * }
+     * */
+    protected virtual void Awake() {
+        //UnityEngine.Debug.Assert(instance == null, "Instance of " + typeof(T) +
+        //    " already exists when a singleton of it called its awake! It was called by " + callingType);
+
+        if (instance == null) {
+            instance = this as T;
+            if (DontDestroy) DontDestroyOnLoad(gameObject);
+        } else if (instance != this as T) {
+            Destroy(gameObject);
+        } else if (DontDestroy) { DontDestroyOnLoad(gameObject); }
+    }
+}
